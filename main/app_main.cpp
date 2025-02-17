@@ -14,6 +14,7 @@
 #endif
 
 #include <esp_matter.h>
+#include <esp_matter_console.h>
 #include <esp_matter_ota.h>
 
 #include <common_macros.h>
@@ -129,7 +130,7 @@ extern "C" void app_main()
 
     /* Initialize the ESP NVS layer */
     nvs_flash_init();
-
+#if 0
 #if CONFIG_PM_ENABLE
     esp_pm_config_t pm_config = {
         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
@@ -140,6 +141,9 @@ extern "C" void app_main()
     };
     err = esp_pm_configure(&pm_config);
 #endif
+#endif
+
+#if 1
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
     node::config_t node_config;
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
@@ -179,7 +183,6 @@ extern "C" void app_main()
 #endif // CONFIG_ENABLE_ENCRYPTED_OTA
 
 #if CONFIG_ENABLE_CHIP_SHELL
-    esp_matter::console::app_dbg_register_commands();
     esp_matter::console::diagnostics_register_commands();
     esp_matter::console::wifi_register_commands();
 #if CONFIG_OPENTHREAD_CLI
@@ -187,5 +190,6 @@ extern "C" void app_main()
 #endif
     esp_matter::console::init();
 #endif
-
+#endif
+    app_driver_init();
 }
