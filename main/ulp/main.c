@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include "ulp_lp_core_i2c.h"
 #include "ulp_lp_core_utils.h"
+#include "ulp_lp_core_gpio.h"
+
 #include "../bh1750_defs.h"
 #include "../htu21_defs.h"
 #include "../ulp_error.h"
@@ -23,9 +25,9 @@
 static uint32_t sensor_on = 0;
 static uint32_t res_update_done = 0;
 volatile uint32_t lux = 0;
-volatile uint16_t humidity = 0;
-volatile uint16_t temperature = 0;
-volatile uint16_t error_no = 0;
+volatile uint32_t humidity = 0;
+volatile uint32_t temperature = 0;
+volatile uint32_t error_no = ULP_NOT_READY;
 volatile uint32_t work_around = 0;
 
 static void bh1750_read()
@@ -74,10 +76,14 @@ static void bh1750_read()
     }
 }
 
+
+
 static void htu21_read()
 {
-    uint8_t buf[3];
+    uint8_t buf[3] = {0};
     esp_err_t ret = ESP_OK;
+
+
 
     // send temperature read command
     buf[0] = HTU21_TRIGGER_TEMP_MEASUREMENT;
@@ -98,8 +104,14 @@ static void htu21_read()
         return;
     }
 
+    if ((buf[1] & 0x02) != 0) {
+        error_no = ULP_ERROR_HTU21_NOT_TEMP;
+        return;
+    }
     // calculate temperature
     temperature = ((buf[0]) << 8) | (buf[1] & 0xFC);
+
+
 
     // send humidity read command
     buf[0] = HTU21_TRIGGER_HUMI_MEASUREMENT;
@@ -121,9 +133,15 @@ static void htu21_read()
         return;
     }
 
+    if ((buf[1] & 0x02) != 0x02) {
+        error_no = ULP_ERROR_HTU21_NOT_HUMI;
+        return;
+    }
+
     // calculate humidity
     humidity = ((buf[0]) << 8) | (buf[1] & 0xFC);
 
+    error_no = ULP_ERROR_NONE;
     ulp_lp_core_wakeup_main_processor();
     // Wakeup main CPU if the temperature or humidity breaches the thresholds
     // if (temperature < TEMP_THRESHOLD_LOW || temperature > TEMP_THRESHOLD_HIGH ||
@@ -131,17 +149,30 @@ static void htu21_read()
     //     ulp_lp_core_wakeup_main_processor();
     // }
 }
-
+#define STATE_MON_PIN         LP_IO_NUM_1
 int main (void)
 {
+    error_no = ULP_NOT_READY;
+
     /* Read BH1750 sensor data */
-    // bh1750_read();
+    bh1750_read();
 
     /* Read HTU21 sensor data */
-    // htu21_read();
-    temperature = 25;
-    humidity = 50;
-    error_no = 0;
+    htu21_read();
+
+    // temperature = 0;
+    // humidity = 0;
+    // lux = 0;
+    // ulp_lp_core_gpio_set_level(STATE_MON_PIN, 0);
+    // ulp_lp_core_delay_us(1000); // wait for the sensor to complete the measurement
+    // ulp_lp_core_gpio_set_level(STATE_MON_PIN, 1);
+
+
     work_around += 1;
+    if(work_around % 2 == 0) {
+        ulp_lp_core_gpio_set_level(STATE_MON_PIN, 1);
+    } else {
+        ulp_lp_core_gpio_set_level(STATE_MON_PIN, 0);
+    }
     return 0;
 }

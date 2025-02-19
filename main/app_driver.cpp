@@ -247,16 +247,23 @@ static void lp_i2c_init(void)
     printf("LP I2C initialized successfully\n");
 }
 
+#define STATE_MON_PIN         GPIO_NUM_1
 
 void ulp_driver_init(void)
 {
 
+    /* Initialize selected GPIO as RTC IO, enable input, disable pullup and pulldown */
+    rtc_gpio_init(STATE_MON_PIN);
+    rtc_gpio_set_direction(STATE_MON_PIN, RTC_GPIO_MODE_OUTPUT_ONLY);
+    rtc_gpio_pulldown_en(STATE_MON_PIN);
+    rtc_gpio_pullup_dis(STATE_MON_PIN);
 
-    lp_i2c_init();
+    rtc_gpio_set_level(STATE_MON_PIN, 0);
 
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     /* not a wakeup from ULP, load the firmware */
     if (cause != ESP_SLEEP_WAKEUP_ULP) {
+        lp_i2c_init();
         printf("Not a ULP wakeup, initializing it! \n");
         init_ulp_program();
     }
@@ -274,12 +281,13 @@ static void init_ulp_program(void)
     /* Start the program */
     ulp_lp_core_cfg_t cfg = {
         .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
-        .lp_timer_sleep_duration_us = 10000000,
+        .lp_timer_sleep_duration_us = 5000000,
     };
 
     err = ulp_lp_core_run(&cfg);
     ESP_ERROR_CHECK(err);
     ESP_LOGI(TAG, "ULP program started\n");
+    vTaskDelay(pdMS_TO_TICKS(500));
 }
 
 
@@ -294,14 +302,16 @@ esp_err_t background_task_create(void *pvParameters)
             float humidity = -6.0f + 125.0f * ulp_humidity / (1 << 16);
             float temp = -46.85f + 175.72f * ulp_temperature / (1 << 16);
 
-            ESP_LOGI(TAG, "Workaround: %ld, Temperature: %.2f°C, Humidity: %.2f%%, Error: %ld", ulp_work_around, temp, humidity, ulp_error_no);
+            ESP_LOGI(TAG, "Workaround: %ld, Lux: %ld, Temperature: %.2f°C, Humidity: %.2f%%, Error: %ld", ulp_work_around, ulp_lux, temp, humidity, ulp_error_no);
 
-            /* Update Matter sensor attributes */
-            esp_matter_attr_val_t temp_val = esp_matter_float(temp);
-            esp_matter_attr_val_t humidity_val = esp_matter_float(humidity);
+            if(ulp_error_no == 0) {
+                /* Update Matter sensor attributes */
+                esp_matter_attr_val_t temp_val = esp_matter_float(temp);
+                esp_matter_attr_val_t humidity_val = esp_matter_float(humidity);
 
-            // attribute::update(2, TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id, &temp_val);
-            // attribute::update(1, RelativeHumidityMeasurement::Id, RelativeHumidityMeasurement::Attributes::MeasuredValue::Id, &humidity_val);
+                app_driver_attribute_update(nullptr, 1, TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id, &temp_val);
+                app_driver_attribute_update(nullptr, 1, RelativeHumidityMeasurement::Id, RelativeHumidityMeasurement::Attributes::MeasuredValue::Id, &humidity_val);
+            }
 
             /* Read every 5 seconds */
             vTaskDelay(pdMS_TO_TICKS(5000));
@@ -314,11 +324,11 @@ esp_err_t background_task_create(void *pvParameters)
 esp_err_t app_driver_init()
 {
     esp_err_t err = ESP_OK;
-    // ulp_driver_init();
+    ulp_driver_init();
     // hp_i2c_init();
     // i2c_main();
     // htu21_read();
-    // background_task_create(nullptr);
+    background_task_create(nullptr);
     return err;
 }
 

@@ -26,6 +26,9 @@
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
 
+#define APP_UP_LAYER_ENABLE                     1
+#define APP_PM_ENABLE                           1
+
 static const char *TAG = "app_main";
 
 using namespace esp_matter;
@@ -124,13 +127,18 @@ static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16
     return err;
 }
 
+
+
 extern "C" void app_main()
 {
     esp_err_t err = ESP_OK;
 
     /* Initialize the ESP NVS layer */
     nvs_flash_init();
-#if 0
+
+    app_driver_init();
+
+#if APP_PM_ENABLE
 #if CONFIG_PM_ENABLE
     esp_pm_config_t pm_config = {
         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
@@ -143,7 +151,7 @@ extern "C" void app_main()
 #endif
 #endif
 
-#if 1
+#if APP_UP_LAYER_ENABLE
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
     node::config_t node_config;
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
@@ -191,5 +199,4 @@ extern "C" void app_main()
     esp_matter::console::init();
 #endif
 #endif
-    app_driver_init();
 }
