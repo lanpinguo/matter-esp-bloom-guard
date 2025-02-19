@@ -9,6 +9,7 @@
 #include <esp_log.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cmath>
 
 #include <device.h>
 #include <esp_matter.h>
@@ -306,11 +307,19 @@ esp_err_t background_task_create(void *pvParameters)
 
             if(ulp_error_no == 0) {
                 /* Update Matter sensor attributes */
-                esp_matter_attr_val_t temp_val = esp_matter_float(temp);
-                esp_matter_attr_val_t humidity_val = esp_matter_float(humidity);
 
-                app_driver_attribute_update(nullptr, 1, TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id, &temp_val);
-                app_driver_attribute_update(nullptr, 1, RelativeHumidityMeasurement::Id, RelativeHumidityMeasurement::Attributes::MeasuredValue::Id, &humidity_val);
+                /* Update humidity sensor attribute */
+                esp_matter_attr_val_t humidity_val = esp_matter_uint16((uint16_t)(humidity * 100));
+                esp_matter::attribute::update(1, RelativeHumidityMeasurement::Id, RelativeHumidityMeasurement::Attributes::MeasuredValue::Id, &humidity_val);
+
+                /* Update temperature sensor attribute */
+                esp_matter_attr_val_t temp_val = esp_matter_int16((int16_t)(temp * 100));
+                esp_matter::attribute::update(2, TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id, &temp_val);
+
+                /* Update light sensor attribute */
+                esp_matter_attr_val_t lux_val = esp_matter_uint16(10000*std::log10(ulp_lux) + 1);
+                esp_matter::attribute::update(3, IlluminanceMeasurement::Id, IlluminanceMeasurement::Attributes::MeasuredValue::Id, &lux_val);
+
             }
 
             /* Read every 5 seconds */
