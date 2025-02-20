@@ -169,10 +169,9 @@ int main (void)
 
 
     work_around += 1;
-    if(work_around % 2 == 0) {
-        ulp_lp_core_gpio_set_level(STATE_MON_PIN, 1);
-    } else {
-        ulp_lp_core_gpio_set_level(STATE_MON_PIN, 0);
-    }
+    ulp_lp_core_gpio_set_level(STATE_MON_PIN, 0);
+    ulp_lp_core_delay_us(1000); // wait for the sensor to complete the measurement
+    ulp_lp_core_gpio_set_level(STATE_MON_PIN, 1);
+
     return 0;
 }
