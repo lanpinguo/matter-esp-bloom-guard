@@ -308,7 +308,7 @@ static void init_ulp_program(void)
     /* Start the program */
     ulp_lp_core_cfg_t cfg = {
         .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
-        .lp_timer_sleep_duration_us = 5000000,
+        .lp_timer_sleep_duration_us = 5000000*4,
     };
 
     err = ulp_lp_core_run(&cfg);
@@ -354,6 +354,7 @@ static void event_process_task(void* arg)
         if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
             ESP_LOGI(TAG, "Received event from GPIO\n");
             sensor_update(arg);
+            vTaskDelay(pdMS_TO_TICKS(100));
             // enable interrupt
             gpio_intr_enable(EVENT_INPUT_IO_0);
         }
@@ -408,5 +409,12 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
                                       uint32_t attribute_id, esp_matter_attr_val_t *val)
 {
     esp_err_t err = ESP_OK;
+    ESP_LOGI(TAG, "Updating attribute %d, %ld, %ld", endpoint_id, cluster_id, attribute_id);
+
+    if (endpoint_id == 1 || endpoint_id == 2 || endpoint_id == 3 || endpoint_id == 4) {
+        uint32_t gpio_num = EVENT_INPUT_IO_0 + endpoint_id;
+        xQueueSend(gpio_evt_queue, &gpio_num, portMAX_DELAY);
+    }
+
     return err;
 }
