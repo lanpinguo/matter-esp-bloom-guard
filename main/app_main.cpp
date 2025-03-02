@@ -138,11 +138,12 @@ extern "C" void app_main()
 
     app_driver_init();
 
+
 #if APP_PM_ENABLE
 #if CONFIG_PM_ENABLE
     esp_pm_config_t pm_config = {
-        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-        .min_freq_mhz = 80,
+        .max_freq_mhz = 80,
+        .min_freq_mhz = 40,
 #if CONFIG_FREERTOS_USE_TICKLESS_IDLE
         .light_sleep_enable = true
 #endif
@@ -150,6 +151,8 @@ extern "C" void app_main()
     err = esp_pm_configure(&pm_config);
 #endif
 #endif
+
+    // vTaskDelay(pdMS_TO_TICKS(2000));
 
 #if APP_UP_LAYER_ENABLE
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
@@ -180,6 +183,7 @@ extern "C" void app_main()
     };
     set_openthread_platform_config(&config);
 #endif
+
 
     /* Matter start */
     err = esp_matter::start(app_event_cb);

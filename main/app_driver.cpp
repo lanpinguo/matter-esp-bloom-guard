@@ -222,6 +222,31 @@ int i2c_main (void)
 }
 #endif
 
+#define EVENT_INPUT_IO_0    GPIO_NUM_3
+#define EVENT_INPUT_PIN_SEL  ((1ULL<<EVENT_INPUT_IO_0))
+
+#define ESP_INTR_FLAG_DEFAULT 0
+
+static QueueHandle_t gpio_evt_queue = NULL;
+
+
+static void IRAM_ATTR gpio_isr_handler(void* arg)
+{
+    uint32_t gpio_num = (uint32_t) arg;
+    static uint32_t event_count = 0;
+    
+    event_count++;
+    if (event_count > 0 && gpio_num == EVENT_INPUT_IO_0) {
+        event_count = 0;
+        // disable interrupt
+        gpio_intr_disable(EVENT_INPUT_IO_0);
+        // send event to queue
+        xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+    }
+}
+
+
+
 static void lp_i2c_init(void)
 {
     esp_err_t ret = ESP_OK;
@@ -293,54 +318,89 @@ static void init_ulp_program(void)
 }
 
 
-esp_err_t background_task_create(void *pvParameters)
+void sensor_update(void* arg)
 {
-    esp_err_t err = ESP_OK;
+    /* Read temperature and humidity values from ULP shared variables */
+    float humidity = -6.0f + 125.0f * ulp_humidity / (1 << 16);
+    float temp = -46.85f + 175.72f * ulp_temperature / (1 << 16);
 
-    /* Create a task to periodically read temperature and humidity from ULP variables */
-    xTaskCreate([](void *pvParameters) {
-        while (1) {
-            /* Read temperature and humidity values from ULP shared variables */
-            float humidity = -6.0f + 125.0f * ulp_humidity / (1 << 16);
-            float temp = -46.85f + 175.72f * ulp_temperature / (1 << 16);
+    ESP_LOGI(TAG, "Workaround: %ld, Lux: %ld, Temperature: %.2f°C, Humidity: %.2f%%, Error: %ld", ulp_work_around, ulp_lux, temp, humidity, ulp_error_no);
 
-            ESP_LOGI(TAG, "Workaround: %ld, Lux: %ld, Temperature: %.2f°C, Humidity: %.2f%%, Error: %ld", ulp_work_around, ulp_lux, temp, humidity, ulp_error_no);
+    if(ulp_error_no == 0) {
+        /* Update Matter sensor attributes */
+        /* Only update attributes if node is commissioned */
+        if (chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
 
-            if(ulp_error_no == 0) {
-                /* Update Matter sensor attributes */
-                /* Only update attributes if node is commissioned */
-                if (chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
+            /* Update humidity sensor attribute */
+            esp_matter_attr_val_t humidity_val = esp_matter_uint16((uint16_t)(humidity * 100));
+            esp_matter::attribute::update(1, RelativeHumidityMeasurement::Id, RelativeHumidityMeasurement::Attributes::MeasuredValue::Id, &humidity_val);
 
-                    /* Update humidity sensor attribute */
-                    esp_matter_attr_val_t humidity_val = esp_matter_uint16((uint16_t)(humidity * 100));
-                    esp_matter::attribute::update(1, RelativeHumidityMeasurement::Id, RelativeHumidityMeasurement::Attributes::MeasuredValue::Id, &humidity_val);
+            /* Update temperature sensor attribute */
+            esp_matter_attr_val_t temp_val = esp_matter_int16((int16_t)(temp * 100));
+            esp_matter::attribute::update(2, TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id, &temp_val);
 
-                    /* Update temperature sensor attribute */
-                    esp_matter_attr_val_t temp_val = esp_matter_int16((int16_t)(temp * 100));
-                    esp_matter::attribute::update(2, TemperatureMeasurement::Id, TemperatureMeasurement::Attributes::MeasuredValue::Id, &temp_val);
-
-                    /* Update light sensor attribute */
-                    esp_matter_attr_val_t lux_val = esp_matter_uint16(10000*std::log10(ulp_lux) + 1);
-                    esp_matter::attribute::update(3, IlluminanceMeasurement::Id, IlluminanceMeasurement::Attributes::MeasuredValue::Id, &lux_val);
-                }
-            }
-
-            /* Read every 5 seconds */
-            vTaskDelay(pdMS_TO_TICKS(5000));
+            /* Update light sensor attribute */
+            esp_matter_attr_val_t lux_val = esp_matter_uint16(10000*std::log10(ulp_lux) + 1);
+            esp_matter::attribute::update(3, IlluminanceMeasurement::Id, IlluminanceMeasurement::Attributes::MeasuredValue::Id, &lux_val);
         }
-    }, "sensor_read", 4096, nullptr, 24, nullptr);
-    return err;
+    }
 }
+
+
+static void event_process_task(void* arg)
+{
+    uint32_t io_num;
+    for (;;) {
+        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+            ESP_LOGI(TAG, "Received event from GPIO\n");
+            sensor_update(arg);
+            // enable interrupt
+            gpio_intr_enable(EVENT_INPUT_IO_0);
+        }
+    }
+}
+
 
 
 esp_err_t app_driver_init()
 {
     esp_err_t err = ESP_OK;
+    gpio_config_t io_conf = {};
+
     ulp_driver_init();
-    // hp_i2c_init();
-    // i2c_main();
-    // htu21_read();
-    background_task_create(nullptr);
+
+    //create a queue to handle gpio event from isr
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    //start gpio task
+    xTaskCreate(event_process_task, "event_process_task", 4096, NULL, 24, NULL);
+
+    //zero-initialize the config structure.
+
+    //interrupt of falling edge
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    //bit mask of the pins
+    io_conf.pin_bit_mask = EVENT_INPUT_PIN_SEL;
+    //set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //enable pull-up mode
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    gpio_config(&io_conf);
+
+    //install gpio isr service
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+    //hook isr handler for specific gpio pin
+    gpio_isr_handler_add(EVENT_INPUT_IO_0, gpio_isr_handler, (void*) EVENT_INPUT_IO_0);
+
+
+    gpio_sleep_sel_dis(EVENT_INPUT_IO_0);
+    rtc_gpio_init(EVENT_INPUT_IO_0);
+    rtc_gpio_set_direction(EVENT_INPUT_IO_0, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pulldown_en(EVENT_INPUT_IO_0);
+    rtc_gpio_pullup_dis(EVENT_INPUT_IO_0);
+    gpio_wakeup_enable(EVENT_INPUT_IO_0,  GPIO_INTR_HIGH_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+
+
     return err;
 }
 
