@@ -91,7 +91,7 @@ static void htu21_read()
     if (ret != ESP_OK) {
         // Skip this round of calculation and return
         error_no = ULP_ERROR_HTU21_TRIGGER_TEMP_MEASUREMENT;
-        return;
+        goto ERR_PROCESS;
     }
 
     ulp_lp_core_delay_us(50000); // wait for the sensor to complete the measurement
@@ -101,12 +101,12 @@ static void htu21_read()
     if (ret != ESP_OK) {
         // Skip this round of calculation and return
         error_no = ULP_ERROR_HTU21_READ_TEMP;
-        return;
+        goto ERR_PROCESS;
     }
 
     if ((buf[1] & 0x02) != 0) {
         error_no = ULP_ERROR_HTU21_NOT_TEMP;
-        return;
+        goto ERR_PROCESS;
     }
     // calculate temperature
     temperature = ((buf[0]) << 8) | (buf[1] & 0xFC);
@@ -119,7 +119,7 @@ static void htu21_read()
     if (ret != ESP_OK) {
         // Skip this round of calculation and return
         error_no = ULP_ERROR_HTU21_TRIGGER_HUMI_MEASUREMENT;
-        return;
+        goto ERR_PROCESS;
     }
 
     
@@ -130,25 +130,33 @@ static void htu21_read()
     if (ret != ESP_OK) {
         // Skip this round of calculation and return
         error_no = ULP_ERROR_HTU21_READ_HUMI;
-        return;
+        goto ERR_PROCESS;
     }
 
     if ((buf[1] & 0x02) != 0x02) {
         error_no = ULP_ERROR_HTU21_NOT_HUMI;
-        return;
+        goto ERR_PROCESS;
     }
 
     // calculate humidity
     humidity = ((buf[0]) << 8) | (buf[1] & 0xFC);
 
     error_no = ULP_ERROR_NONE;
-    ulp_lp_core_wakeup_main_processor();
+    // ulp_lp_core_wakeup_main_processor();
     // Wakeup main CPU if the temperature or humidity breaches the thresholds
     // if (temperature < TEMP_THRESHOLD_LOW || temperature > TEMP_THRESHOLD_HIGH ||
     //     humidity < HUMI_THRESHOLD_LOW || humidity > HUMI_THRESHOLD_HIGH) {
     //     ulp_lp_core_wakeup_main_processor();
     // }
+    return;
+
+ERR_PROCESS:
+    // send soft reset command
+    buf[0] = HTU21_SOFT_RESET;
+    ret = lp_core_i2c_master_write_to_device(LP_I2C_NUM_0, HTU21_I2C_ADDR, buf, 1, LP_I2C_TRANS_WAIT_FOREVER);
 }
+
+
 #define STATE_MON_PIN         LP_IO_NUM_1
 int main (void)
 {
